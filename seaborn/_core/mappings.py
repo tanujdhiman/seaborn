@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections import abc
+
 import numpy as np
 import pandas as pd
 import matplotlib as mpl
@@ -13,12 +15,15 @@ if TYPE_CHECKING:
     from typing import Optional, Literal
     from pandas import Series
     from matplotlib.colors import Colormap, Normalize
+    from matplotlib.scale import Scale  # TODO or our own ScaleWrapper
     from .typing import PaletteSpec
 
 
 class SemanticMapping:
     """Base class for mappings between data and visual attributes."""
-    def setup(self, data: Series) -> SemanticMapping:
+
+    def setup(self, data: Series, scale: Optional[Scale]) -> SemanticMapping:
+        # TODO why not just implement the GroupMapping setup() here?
         raise NotImplementedError()
 
     def __call__(self, x):  # TODO types; will need to overload (wheee)
@@ -54,7 +59,7 @@ class SemanticMapping:
 
 class GroupMapping(SemanticMapping):
     """Mapping that does not alter any visual properties of the artists."""
-    def setup(self, data: Series) -> GroupMapping:
+    def setup(self, data: Series, scale: Optional[Scale]) -> GroupMapping:
         self.levels = categorical_order(data)
         return self
 
@@ -78,6 +83,7 @@ class HueMapping(SemanticMapping):
     def setup(
         self,
         data: Series,  # TODO generally rename Series arguments to distinguish from DF?
+        scale: Optional[Scale],
     ) -> HueMapping:
         """Infer the type of mapping to use and define it using this vector of data."""
         palette: Optional[PaletteSpec] = self._input_palette
@@ -85,13 +91,7 @@ class HueMapping(SemanticMapping):
         norm: Optional[Normalize] = self._input_norm
         cmap: Optional[Colormap] = None
 
-        # TODO We are not going to have the concept of wide-form data within PlotData
-        # but we will still support it. I think seaborn functions that accept wide-form
-        # data can explicitly set the hue mapping to be categorical.
-        # Then we can drop this.
-        input_format: Literal["long", "wide"] = "long"
-
-        map_type = self._infer_map_type(data, palette, norm, input_format)
+        map_type = self._infer_map_type(data, palette, norm)
 
         # Our goal is to end up with a dictionary mapping every unique
         # value in `data` to a color. We will also keep track of the
@@ -147,7 +147,6 @@ class HueMapping(SemanticMapping):
         data: Series,
         palette: Optional[PaletteSpec],
         norm: Optional[Normalize],
-        input_format: Literal["long", "wide"],
     ) -> Optional[Literal["numeric", "categorical", "datetime"]]:
         """Determine how to implement the mapping."""
         map_type: Optional[Literal["numeric", "categorical", "datetime"]]
@@ -155,9 +154,7 @@ class HueMapping(SemanticMapping):
             map_type = "categorical"
         elif norm is not None:
             map_type = "numeric"
-        elif isinstance(palette, (dict, list)):  # TODO mapping/sequence?
-            map_type = "categorical"
-        elif input_format == "wide":
+        elif isinstance(palette, (abc.Mapping, abc.Sequence)):
             map_type = "categorical"
         else:
             map_type = variable_type(data)

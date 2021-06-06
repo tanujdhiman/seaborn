@@ -10,6 +10,7 @@ from ..axisgrid import FacetGrid
 from .rules import categorical_order
 from .data import PlotData
 from .mappings import GroupMapping, HueMapping
+from .scales import ScaleWrapper, CategoricalScale
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -50,9 +51,10 @@ class Plot:
             "hue": HueMapping(),
         }
 
+        # TODO we need to default to some sort of agnostic type
         self._scales = {
-            "x": mpl.scale.LinearScale("x"),
-            "y": mpl.scale.LinearScale("y"),
+            "x": ScaleWrapper(mpl.scale.LinearScale("x"), "numeric"),
+            "y": ScaleWrapper(mpl.scale.LinearScale("y"), "numeric"),
         }
 
     def on(self) -> Plot:
@@ -97,6 +99,7 @@ class Plot:
         row_order: Optional[Vector] = None,
         col_wrap: Optional[int] = None,
         data: Optional[DataSource] = None,
+        **grid_kwargs,
         # TODO what other parameters? sharex/y?
     ) -> Plot:
 
@@ -136,6 +139,8 @@ class Plot:
         if "col" in facetspec:
             facetspec["col"]["wrap"] = col_wrap
 
+        facetspec["grid_kwargs"] = grid_kwargs
+
         self._facetspec = facetspec
         self._facetdata = data  # TODO messy, but needed if variables are added here
 
@@ -154,11 +159,18 @@ class Plot:
         self._mappings["hue"] = HueMapping(palette, order, norm)
         return self
 
-    def scale_numeric(self, axis, scale="linear", **kwargs) -> Plot:
+    def scale_numeric(self, var, scale="linear", **kwargs) -> Plot:
 
-        scale = mpl.scale.scale_factory(scale, axis, **kwargs)
-        self._scales[axis] = scale
+        scale = mpl.scale.scale_factory(scale, var, **kwargs)
+        self._scales[var] = ScaleWrapper(scale, "numeric")
+        return self
 
+    def scale_categorical(self, var, order=None, formatter=None) -> Plot:
+
+        # TODO how to set margins "nicely"?
+
+        scale = CategoricalScale(var, order, formatter)
+        self._scales[var] = ScaleWrapper(scale, "categorical")
         return self
 
     def theme(self) -> Plot:
@@ -223,7 +235,8 @@ class Plot:
                     facet_vars[dim] = name
                 if dim == "col":
                     facet_vars["col_wrap"] = self._facetspec[dim]["wrap"]
-            grid = FacetGrid(facet_data, **facet_vars, pyplot=False)
+            kwargs = self._facetspec["grid_kwargs"]
+            grid = FacetGrid(facet_data, **facet_vars, pyplot=False, **kwargs)
             grid.set_titles()
 
             self._figure = grid.fig
@@ -238,8 +251,8 @@ class Plot:
 
         axes_list = list(self._facets.axes.flat) if self._ax is None else [self._ax]
         for ax in axes_list:
-            ax.set_xscale(self._scales["x"])
-            ax.set_yscale(self._scales["y"])
+            ax.set_xscale(self._scales["x"]._scale)
+            ax.set_yscale(self._scales["y"]._scale)
 
         # TODO good place to do this? (needs to handle FacetGrid)
         obj = self._ax if self._facets is None else self._facets
@@ -262,7 +275,8 @@ class Plot:
                 all_data = pd.concat(
                     [layer.data.frame.get(var, None) for layer in layers]
                 ).reset_index(drop=True)
-                mappings[var] = mapping.setup(all_data)
+                scale = self._scales.get(var, None)
+                mappings[var] = mapping.setup(all_data, scale)
 
         return mappings
 
@@ -359,21 +373,20 @@ class Plot:
         # for var in "yx":
         #     if var not in coord_df:
         #        continue
-        for var, col in coord_df.items():
+        for var, data in coord_df.items():
 
             axis = var[0]
             axis_obj = getattr(ax, f"{axis}axis")
+            scale = self._scales[axis]
 
-            # TODO should happen upstream, in setup_figure(?), but here for now
-            # will need to account for order; we don't have that yet
-            axis_obj.update_units(col)
+            if scale.order is not None:
+                data = data[data.isin(scale.order)]
 
-            # TODO subset categories based on whether specified in order
-            ...
+            data = scale.cast(data)
+            axis_obj.update_units(categorical_order(data))
 
-            transform = self._scales[axis].get_transform().transform
-            scaled = transform(axis_obj.convert_units(col))
-            out_df.loc[col.index, var] = scaled
+            scaled = self._scales[axis].forward(axis_obj.convert_units(data))
+            out_df.loc[data.index, var] = scaled
 
     def _unscale_coords(self, df: DataFrame) -> DataFrame:
 
@@ -382,8 +395,7 @@ class Plot:
 
         for var, col in coord_df.items():
             axis = var[0]
-            invert_scale = self._scales[axis].get_transform().inverted().transform
-            out_df[var] = invert_scale(coord_df[var])
+            out_df[var] = self._scales[axis].reverse(coord_df[var])
 
         return out_df
 
