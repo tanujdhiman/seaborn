@@ -72,12 +72,10 @@ class HueMapping(SemanticMapping):
     def __init__(
         self,
         palette: Optional[PaletteSpec] = None,
-        order: Optional[list] = None,
-        norm: Optional[Normalize] = None,
+        norm: Optional[Normalize] = None,  # TODO does this come from scale_numeric?
     ):
 
         self._input_palette = palette
-        self._input_order = order
         self._input_norm = norm
 
     def setup(
@@ -87,11 +85,25 @@ class HueMapping(SemanticMapping):
     ) -> HueMapping:
         """Infer the type of mapping to use and define it using this vector of data."""
         palette: Optional[PaletteSpec] = self._input_palette
-        order: Optional[list] = self._input_order
         norm: Optional[Normalize] = self._input_norm
         cmap: Optional[Colormap] = None
 
-        map_type = self._infer_map_type(data, palette, norm)
+        order = None if scale is None else scale.order
+
+        # TODO We want to use the scale.type here to help inference.
+        # But what is order of priority?
+        # Explicitly setting the scale with e.g. scale_categorical("hue")
+        # should take precedence. But at this point, the scale type (if not
+        # specified) has been set by _setup_scale. But ... maybe only x/y get
+        # their scale type set if no scale is explicitly defined. So it's fine
+        # to use both scale.type (having highest priority) and variable_dtype(data)
+        # (having lowest priority). But this seems messy and like it might be the
+        # source of future bugs...
+
+        # TODO either way we need to add some input checks ... e.g. specifying
+        # a numeric scale and a qualitative colormap should fail nicely.
+
+        map_type = self._infer_map_type(scale, palette, norm, data)
 
         # Our goal is to end up with a dictionary mapping every unique
         # value in `data` to a color. We will also keep track of the
@@ -144,13 +156,16 @@ class HueMapping(SemanticMapping):
 
     def _infer_map_type(
         self,
-        data: Series,
+        scale: Scale,
         palette: Optional[PaletteSpec],
         norm: Optional[Normalize],
-    ) -> Optional[Literal["numeric", "categorical", "datetime"]]:
+        data: Series,
+    ) -> Literal["numeric", "categorical", "datetime"]:
         """Determine how to implement the mapping."""
         map_type: Optional[Literal["numeric", "categorical", "datetime"]]
-        if palette in QUAL_PALETTES:
+        if scale is not None:
+            return scale.type
+        elif palette in QUAL_PALETTES:
             map_type = "categorical"
         elif norm is not None:
             map_type = "numeric"

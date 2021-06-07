@@ -7,7 +7,7 @@ import pandas as pd
 import matplotlib as mpl
 
 from ..axisgrid import FacetGrid
-from .rules import categorical_order
+from .rules import categorical_order, variable_type
 from .data import PlotData
 from .mappings import GroupMapping, HueMapping
 from .scales import ScaleWrapper, CategoricalScale
@@ -46,15 +46,18 @@ class Plot:
 
         self._data = PlotData(data, variables)
         self._layers = []
+
+        # TODO see notes in _setup_mappings I think we're going to start with this
+        # empty and define the defaults elsewhere
         self._mappings = {
             "group": GroupMapping(),
             "hue": HueMapping(),
         }
 
-        # TODO we need to default to some sort of agnostic type
+        # TODO is using "unknown" here the best approach?
         self._scales = {
-            "x": ScaleWrapper(mpl.scale.LinearScale("x"), "numeric"),
-            "y": ScaleWrapper(mpl.scale.LinearScale("y"), "numeric"),
+            "x": ScaleWrapper(mpl.scale.LinearScale("x"), "unknown"),
+            "y": ScaleWrapper(mpl.scale.LinearScale("y"), "unknown"),
         }
 
     def on(self) -> Plot:
@@ -146,17 +149,17 @@ class Plot:
 
         return self
 
+    # TODO map_hue or map_color/map_facecolor/map_edgecolor (or ... all of the above?)
     def map_hue(
         self,
         palette: Optional[PaletteSpec] = None,
-        order: Optional[list] = None,
         norm: Optional[Normalize] = None,
     ) -> Plot:
 
         # TODO we do some fancy business currently to avoid having to
         # write these ... do we want that to persist or is it too confusing?
         # ALSO TODO should these be initialized with defaults?
-        self._mappings["hue"] = HueMapping(palette, order, norm)
+        self._mappings["hue"] = HueMapping(palette, norm)
         return self
 
     def scale_numeric(self, var, scale="linear", **kwargs) -> Plot:
@@ -167,7 +170,7 @@ class Plot:
 
     def scale_categorical(self, var, order=None, formatter=None) -> Plot:
 
-        # TODO how to set margins "nicely"?
+        # TODO how to set limits/margins "nicely"?
 
         scale = CategoricalScale(var, order, formatter)
         self._scales[var] = ScaleWrapper(scale, "categorical")
@@ -181,6 +184,10 @@ class Plot:
         return self
 
     def plot(self) -> Plot:
+
+        # TODO note that as currently written this doesn't need to come before
+        # _setup_figure, but _setup_figure does use self._scales
+        self._setup_scales()
 
         # === TODO clean series of setup functions (TODO bikeshed names)
         self._setup_figure()
@@ -206,10 +213,26 @@ class Plot:
                     self._facetdata.frame,
                     {v: v for v in ["col", "row"] if v in self._facetdata}
                 )
-
             self._plot_layer(layer)
 
         return self
+
+    def _setup_scales(self):
+
+        # TODO one issue here is that we are going to assume all subplots of a
+        # figure have the same type of scale. This is potentially problematic if
+        # we are not sharing axes ... e.g. we currently can't use displot to
+        # show all histograms if some of those histograms need to be categorical.
+        # We can decide how much of a problem we are going to consider that to be...
+
+        layers = self._layers
+        for var, scale in self._scales.items():
+            if scale.type == "unknown" and any(var in layer.data for layer in layers):
+                # TODO this is copied from _setup_mappings ... ripe for abstraction!
+                all_data = pd.concat(
+                    [layer.data.frame.get(var, None) for layer in layers]
+                ).reset_index(drop=True)
+                scale.type = variable_type(all_data)
 
     def _setup_figure(self):
 
@@ -224,7 +247,7 @@ class Plot:
         # TODO use context manager with theme that has been set
         # TODO (or maybe wrap THIS function with context manager; would be cleaner)
 
-        if self._facetspec:
+        if "row" in self._facetspec or "col" in self._facetspec:
 
             facet_data = pd.DataFrame()
             facet_vars = {}
@@ -232,12 +255,14 @@ class Plot:
                 if dim in self._facetspec:
                     name = self._facetspec[dim]["name"]
                     facet_data[name] = self._facetspec[dim]["data"]
+                    # TODO FIXME this fails if faceting variables don't have a name
+                    # note current relplot also fails, but catplot works...
                     facet_vars[dim] = name
-                if dim == "col":
-                    facet_vars["col_wrap"] = self._facetspec[dim]["wrap"]
+                    if dim == "col":
+                        facet_vars["col_wrap"] = self._facetspec[dim]["wrap"]
             kwargs = self._facetspec["grid_kwargs"]
             grid = FacetGrid(facet_data, **facet_vars, pyplot=False, **kwargs)
-            grid.set_titles()
+            grid.set_titles()  # TODO use our own titleing interface?
 
             self._figure = grid.fig
             self._ax = None
@@ -266,8 +291,11 @@ class Plot:
 
     def _setup_mappings(self) -> dict[str, SemanticMapping]:
 
-        all_data = pd.concat([layer.data.frame for layer in self._layers])
         layers = self._layers
+
+        # TODO we should setup default mappings here based on whether a mapping
+        # variable appears in at least one of the layer data but isn't in self._mappings
+        # Source of what mappings to check can be some dictionary of default mappings?
 
         mappings = {}
         for var, mapping in self._mappings.items():
@@ -374,6 +402,9 @@ class Plot:
         #     if var not in coord_df:
         #        continue
         for var, data in coord_df.items():
+
+            # TODO Explain the logic of this method thoroughly
+            # It is clever, but a bit confusing!
 
             axis = var[0]
             axis_obj = getattr(ax, f"{axis}axis")
