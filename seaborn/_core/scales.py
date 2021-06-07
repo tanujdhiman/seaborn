@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
 from matplotlib.scale import LinearScale
+from matplotlib.colors import Normalize
 
 from .rules import categorical_order
 
@@ -9,15 +11,21 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from typing import Optional
     from collections.abc import Sequence
-    from matplotlib.scale import Scale
+    from matplotlib.scale import ScaleBase
     from .typing import VariableType
 
 
 class ScaleWrapper:
 
-    def __init__(self, scale: Scale, type: VariableType):
+    def __init__(
+        self,
+        scale: ScaleBase,
+        type: VariableType,
+        norm: Optional[Normalize] = None
+    ):
 
         self._scale = scale
+        self.norm = norm
         transform = scale.get_transform()
         self.forward = transform.transform
         self.reverse = transform.inverted().transform
@@ -56,7 +64,53 @@ class CategoricalScale(LinearScale):
             data = data.map(self.formatter)
 
         data = pd.Series(pd.Categorical(
-            data, order, self.order is not None
+            data, order.unique(), self.order is not None
         ), index=data.index)
 
         return data
+
+
+def norm_from_scale(
+    scale: ScaleBase, norm: Optional[tuple[Optional[float], Optional[float]]],
+) -> Normalize:
+
+    if isinstance(norm, Normalize):
+        return norm
+
+    if norm is None:
+        vmin = vmax = None
+    else:
+        vmin, vmax = norm  # TODO more helpful error if this fails?
+
+    class ScaledNorm(Normalize):
+
+        def __call__(self, value, clip=None):
+            # From github.com/matplotlib/matplotlib/blob/v3.4.2/lib/matplotlib/colors.py
+            # See github.com/matplotlib/matplotlib/tree/v3.4.2/LICENSE
+            value, is_scalar = self.process_value(value)
+            self.autoscale_None(value)
+            if self.vmin > self.vmax:
+                raise ValueError("vmin must be less or equal to vmax")
+            if self.vmin == self.vmax:
+                return np.full_like(value, 0)
+            if clip is None:
+                clip = self.clip
+            if clip:
+                value = np.clip(value, self.vmin, self.vmax)
+            # Our changes start
+            t_value = self.transform(value).reshape(np.shape(value))
+            t_vmin, t_vmax = self.transform([self.vmin, self.vmax])
+            # Our changes end
+            if not np.isfinite([t_vmin, t_vmax]).all():
+                raise ValueError("Invalid vmin or vmax")
+            t_value -= t_vmin
+            t_value /= (t_vmax - t_vmin)
+            t_value = np.ma.masked_invalid(t_value, copy=False)
+            return t_value[0] if is_scalar else t_value
+
+    norm = ScaledNorm(vmin, vmax)
+
+    # TODO do this, or build the norm into the ScaleWrapper.foraward interface?
+    norm.transform = scale.get_transform().transform
+
+    return norm

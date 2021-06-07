@@ -10,7 +10,7 @@ from ..axisgrid import FacetGrid
 from .rules import categorical_order, variable_type
 from .data import PlotData
 from .mappings import GroupMapping, HueMapping
-from .scales import ScaleWrapper, CategoricalScale
+from .scales import ScaleWrapper, CategoricalScale, norm_from_scale
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from pandas import DataFrame
     from matplotlib.figure import Figure
     from matplotlib.axes import Axes
-    from matplotlib.scale import ScaleBase as Scale
+    from matplotlib.scale import ScaleBase
     from matplotlib.colors import Normalize
     from .mappings import SemanticMapping
     from .typing import DataSource, Vector, PaletteSpec, VariableSpec
@@ -32,7 +32,7 @@ class Plot:
     _data: PlotData
     _layers: list[Layer]
     _mappings: dict[str, SemanticMapping]  # TODO keys as Literal, or use TypedDict?
-    _scales: dict[str, Scale]
+    _scales: dict[str, ScaleBase]
 
     _figure: Figure
     _ax: Optional[Axes]
@@ -81,7 +81,7 @@ class Plot:
 
         layer_data = self._data.concat(data, variables)
 
-        if stat is None:
+        if stat is None:  # TODO do we need some way to say "do no stat transformation"?
             stat = mark.default_stat
 
         orient = {"v": "x", "h": "y"}.get(orient, orient)
@@ -102,8 +102,7 @@ class Plot:
         row_order: Optional[Vector] = None,
         col_wrap: Optional[int] = None,
         data: Optional[DataSource] = None,
-        **grid_kwargs,
-        # TODO what other parameters? sharex/y?
+        **grid_kwargs,  # possibly/probably expose relevant ones
     ) -> Plot:
 
         # Note: can't pass `None` here or it will undo the `Plot()` def
@@ -153,27 +152,55 @@ class Plot:
     def map_hue(
         self,
         palette: Optional[PaletteSpec] = None,
-        norm: Optional[Normalize] = None,
     ) -> Plot:
 
         # TODO we do some fancy business currently to avoid having to
         # write these ... do we want that to persist or is it too confusing?
         # ALSO TODO should these be initialized with defaults?
-        self._mappings["hue"] = HueMapping(palette, norm)
+        self._mappings["hue"] = HueMapping(palette)
         return self
 
-    def scale_numeric(self, var, scale="linear", **kwargs) -> Plot:
+    def scale_numeric(
+        self,
+        var: str,
+        scale: str | ScaleBase = "linear",
+        norm: Optional[tuple[Optional[float], Optional[float]] | Normalize] = None,
+        **kwargs
+    ) -> Plot:
+
+        # TODO use norm for setting axis limits? Or otherwise share an interface?
 
         scale = mpl.scale.scale_factory(scale, var, **kwargs)
-        self._scales[var] = ScaleWrapper(scale, "numeric")
+        norm = norm_from_scale(scale, norm)
+        self._scales[var] = ScaleWrapper(scale, "numeric", norm=norm)
         return self
 
-    def scale_categorical(self, var, order=None, formatter=None) -> Plot:
+    def scale_categorical(
+        self,
+        var: str,
+        order: Optional[Vector] = None,  # this will pick up scalars?
+        formatter: Optional[Callable] = None,
+    ) -> Plot:
 
         # TODO how to set limits/margins "nicely"?
+        # TODO similarly, should this modify grid state like current categorical plots?
 
         scale = CategoricalScale(var, order, formatter)
         self._scales[var] = ScaleWrapper(scale, "categorical")
+        return self
+
+    def scale_datetime(self, var) -> Plot:
+
+        raise NotImplementedError()
+
+        # TODO what should this do? The DateTime scale can cast which will
+        # make it easier if you read in data with dates as strings.
+        # It will be nice to have more control over the formatting of the ticks
+        # which is pretty annoying in standard matplotlib.
+        # Should datetime data ever have anything other than a linear scale?
+        # The only thing I can really think of are geologic/astro plots that
+        # use a reverse log scale.
+
         return self
 
     def theme(self) -> Plot:
@@ -536,6 +563,8 @@ class Plot:
 
         # TODO use bbox_inches="tight" like the inline backend?
         # pro: better results,  con: (sometimes) confusing results
+        # Better solution would be to default (with option to change)
+        # to using constrained/tight layout.
         self._figure.savefig(buffer, format="png", bbox_inches="tight")
         return buffer.getvalue()
 

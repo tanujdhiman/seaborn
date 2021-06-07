@@ -69,14 +69,9 @@ class HueMapping(SemanticMapping):
 
     # TODO type the important class attributes here
 
-    def __init__(
-        self,
-        palette: Optional[PaletteSpec] = None,
-        norm: Optional[Normalize] = None,  # TODO does this come from scale_numeric?
-    ):
+    def __init__(self, palette: Optional[PaletteSpec] = None):
 
         self._input_palette = palette
-        self._input_norm = norm
 
     def setup(
         self,
@@ -85,25 +80,15 @@ class HueMapping(SemanticMapping):
     ) -> HueMapping:
         """Infer the type of mapping to use and define it using this vector of data."""
         palette: Optional[PaletteSpec] = self._input_palette
-        norm: Optional[Normalize] = self._input_norm
         cmap: Optional[Colormap] = None
 
+        norm = None if scale is None else scale.norm
         order = None if scale is None else scale.order
 
-        # TODO We want to use the scale.type here to help inference.
-        # But what is order of priority?
-        # Explicitly setting the scale with e.g. scale_categorical("hue")
-        # should take precedence. But at this point, the scale type (if not
-        # specified) has been set by _setup_scale. But ... maybe only x/y get
-        # their scale type set if no scale is explicitly defined. So it's fine
-        # to use both scale.type (having highest priority) and variable_dtype(data)
-        # (having lowest priority). But this seems messy and like it might be the
-        # source of future bugs...
+        # TODO We need to add some input checks ...
+        # e.g. specifying a numeric scale and a qualitative colormap should fail nicely.
 
-        # TODO either way we need to add some input checks ... e.g. specifying
-        # a numeric scale and a qualitative colormap should fail nicely.
-
-        map_type = self._infer_map_type(scale, palette, norm, data)
+        map_type = self._infer_map_type(scale, palette, data)
 
         # Our goal is to end up with a dictionary mapping every unique
         # value in `data` to a color. We will also keep track of the
@@ -145,7 +130,6 @@ class HueMapping(SemanticMapping):
 
         # TODO I don't love how this is kind of a mish-mash of attributes
         # Can we be more consistent across SemanticMapping subclasses?
-        self.map_type = map_type
         self.lookup_table = lookup_table
         self.palette = palette
         self.levels = levels
@@ -158,7 +142,6 @@ class HueMapping(SemanticMapping):
         self,
         scale: Scale,
         palette: Optional[PaletteSpec],
-        norm: Optional[Normalize],
         data: Series,
     ) -> Literal["numeric", "categorical", "datetime"]:
         """Determine how to implement the mapping."""
@@ -167,8 +150,6 @@ class HueMapping(SemanticMapping):
             return scale.type
         elif palette in QUAL_PALETTES:
             map_type = "categorical"
-        elif norm is not None:
-            map_type = "numeric"
         elif isinstance(palette, (abc.Mapping, abc.Sequence)):
             map_type = "categorical"
         else:
@@ -252,12 +233,13 @@ class HueMapping(SemanticMapping):
                 cmap = color_palette(palette, as_cmap=True)
 
             # Now sort out the data normalization
+            # TODO consolidate in ScaleWrapper so we always have a norm here?
             if norm is None:
                 norm = mpl.colors.Normalize()
             elif isinstance(norm, tuple):
                 norm = mpl.colors.Normalize(*norm)
             elif not isinstance(norm, mpl.colors.Normalize):
-                err = "``hue_norm`` must be None, tuple, or Normalize object."
+                err = "`hue_norm` must be None, tuple, or Normalize object."
                 raise ValueError(err)
 
             if not norm.scaled():
