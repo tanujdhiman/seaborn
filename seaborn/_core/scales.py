@@ -10,7 +10,6 @@ from .rules import variable_type, categorical_order
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from typing import Optional
-    from collections.abc import Sequence
     from matplotlib.scale import ScaleBase
     from .typing import VariableType
 
@@ -44,8 +43,7 @@ class ScaleWrapper:
 
 
 class CategoricalScale(LinearScale):
-
-    def __init__(self, axis: str, order: Optional[Sequence], formatter: Optional):
+    def __init__(self, axis: str, order: Optional[list], formatter: Optional):
         # TODO what type is formatter?
 
         super().__init__(axis)

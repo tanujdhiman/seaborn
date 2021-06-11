@@ -184,6 +184,10 @@ class Plot:
 
         # TODO how to set limits/margins "nicely"?
         # TODO similarly, should this modify grid state like current categorical plots?
+        # TODO "smart"/data-dependant ordering (e.g. order by median of y variable)
+
+        if order is not None:
+            order = list(order)
 
         scale = CategoricalScale(var, order, formatter)
         self._scales[var] = ScaleWrapper(scale, "categorical")
