@@ -6,11 +6,16 @@ import itertools
 import pandas as pd
 import matplotlib as mpl
 
-from ..axisgrid import FacetGrid
-from .rules import categorical_order, variable_type
-from .data import PlotData
-from .mappings import GroupMapping, HueMapping
-from .scales import ScaleWrapper, CategoricalScale, DatetimeScale, norm_from_scale
+from seaborn.axisgrid import FacetGrid
+from seaborn._core.rules import categorical_order, variable_type
+from seaborn._core.data import PlotData
+from seaborn._core.mappings import GroupMapping, HueMapping
+from seaborn._core.scales import (
+    ScaleWrapper,
+    CategoricalScale,
+    DatetimeScale,
+    norm_from_scale
+)
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -21,10 +26,10 @@ if TYPE_CHECKING:
     from matplotlib.axes import Axes
     from matplotlib.scale import ScaleBase
     from matplotlib.colors import Normalize
-    from .mappings import SemanticMapping
-    from .typing import DataSource, Vector, PaletteSpec, VariableSpec
-    from .._marks.base import Mark
-    from .._stats.base import Stat
+    from seaborn._core.mappings import SemanticMapping
+    from seaborn._marks.base import Mark
+    from seaborn._stats.base import Stat
+    from seaborn._core.typing import DataSource, PaletteSpec, VariableSpec
 
 
 class Plot:

@@ -5,7 +5,7 @@ import pandas as pd
 from matplotlib.scale import LinearScale
 from matplotlib.colors import Normalize
 
-from .rules import variable_type, categorical_order
+from seaborn._core.rules import VarType, variable_type, categorical_order
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
