@@ -6,23 +6,24 @@ import numpy as np
 import pandas as pd
 import matplotlib as mpl
 
-from .rules import categorical_order, variable_type
-from ..utils import get_color_cycle, remove_na
-from ..palettes import QUAL_PALETTES, color_palette
+from seaborn._core.rules import VarType, variable_type, categorical_order
+from seaborn.utils import get_color_cycle, remove_na
+from seaborn.palettes import QUAL_PALETTES, color_palette
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
-    from typing import Optional, Literal
     from pandas import Series
     from matplotlib.colors import Colormap, Normalize
-    from matplotlib.scale import Scale  # TODO or our own ScaleWrapper
-    from .typing import PaletteSpec
+    from matplotlib.scale import Scale
+    from seaborn._core.typing import PaletteSpec
 
 
 class SemanticMapping:
     """Base class for mappings between data and visual attributes."""
 
-    def setup(self, data: Series, scale: Optional[Scale]) -> SemanticMapping:
+    levels: list  # TODO Alternately, use keys of lookup_table?
+
+    def setup(self, data: Series, scale: Scale | None) -> SemanticMapping:
         # TODO why not just implement the GroupMapping setup() here?
         raise NotImplementedError()
 
@@ -59,7 +60,7 @@ class SemanticMapping:
 
 class GroupMapping(SemanticMapping):
     """Mapping that does not alter any visual properties of the artists."""
-    def setup(self, data: Series, scale: Optional[Scale]) -> GroupMapping:
+    def setup(self, data: Series, scale: Scale | None) -> GroupMapping:
         self.levels = categorical_order(data)
         return self
 
@@ -69,18 +70,18 @@ class HueMapping(SemanticMapping):
 
     # TODO type the important class attributes here
 
-    def __init__(self, palette: Optional[PaletteSpec] = None):
+    def __init__(self, palette: PaletteSpec = None):
 
         self._input_palette = palette
 
     def setup(
         self,
         data: Series,  # TODO generally rename Series arguments to distinguish from DF?
-        scale: Optional[Scale],
+        scale: Scale | None,  # TODO or always have a Scale?
     ) -> HueMapping:
         """Infer the type of mapping to use and define it using this vector of data."""
-        palette: Optional[PaletteSpec] = self._input_palette
-        cmap: Optional[Colormap] = None
+        palette: PaletteSpec = self._input_palette
+        cmap: Colormap | None = None
 
         norm = None if scale is None else scale.norm
         order = None if scale is None else scale.order
@@ -141,17 +142,17 @@ class HueMapping(SemanticMapping):
     def _infer_map_type(
         self,
         scale: Scale,
-        palette: Optional[PaletteSpec],
+        palette: PaletteSpec,
         data: Series,
-    ) -> Literal["numeric", "categorical", "datetime"]:
+    ) -> VarType:
         """Determine how to implement the mapping."""
-        map_type: Optional[Literal["numeric", "categorical", "datetime"]]
+        map_type: VarType
         if scale is not None:
             return scale.type
         elif palette in QUAL_PALETTES:
-            map_type = "categorical"
+            map_type = VarType("categorical")
         elif isinstance(palette, (abc.Mapping, abc.Sequence)):
-            map_type = "categorical"
+            map_type = VarType("categorical")
         else:
             map_type = variable_type(data)
 
@@ -160,8 +161,8 @@ class HueMapping(SemanticMapping):
     def _setup_categorical(
         self,
         data: Series,
-        palette: Optional[PaletteSpec],
-        order: Optional[list],
+        palette: PaletteSpec,
+        order: list | None,
     ) -> tuple[list, dict]:
         """Determine colors when the hue mapping is categorical."""
         # -- Identify the order and name of the levels
@@ -202,9 +203,9 @@ class HueMapping(SemanticMapping):
     def _setup_numeric(
         self,
         data: Series,
-        palette: Optional[PaletteSpec],
-        norm: Optional[Normalize],
-    ) -> tuple[list, dict, Optional[Normalize], Colormap]:
+        palette: PaletteSpec,
+        norm: Normalize | None,
+    ) -> tuple[list, dict, Normalize | None, Colormap]:
         """Determine colors when the hue variable is quantitative."""
         cmap: Colormap
         if isinstance(palette, dict):

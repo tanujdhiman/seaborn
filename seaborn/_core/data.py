@@ -5,26 +5,21 @@ import pandas as pd
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
-    from typing import Optional, Any
-    from collections.abc import Hashable, Mapping
     from pandas import DataFrame
-    from .typing import Vector
+    from seaborn._core.typing import DataSource, VariableSpec
 
 
 class PlotData:
     """Data table with plot variable schema and mapping to original names."""
     frame: DataFrame
-    names: dict[str, Optional[str]]
-    _source: Optional[DataFrame | Mapping]
+    names: dict[str, str | None]
+    _source: DataSource
 
     def __init__(
         self,
-        data: Optional[DataFrame | Mapping],
-        variables: Optional[dict[str, Hashable | Vector]],
+        data: DataSource,
+        variables: dict[str, VariableSpec],
     ):
-
-        if variables is None:
-            variables = {}
 
         frame, names = self._assign_variables(data, variables)
 
@@ -34,17 +29,16 @@ class PlotData:
         self._source_data = data
         self._source_vars = variables
 
-    def __contains__(self, key: Hashable) -> bool:
+    def __contains__(self, key: str) -> bool:
         """Boolean check on whether a variable is defined in this dataset."""
         return key in self.frame
 
     def concat(
         self,
-        data: Optional[DataFrame | Mapping],
-        variables: Optional[dict[str, Optional[Hashable | Vector]]],
+        data: DataSource,
+        variables: dict[str, VariableSpec] | None,
     ) -> PlotData:
         """Add, replace, or drop variables and return as a new dataset."""
-
         # Inherit the original source of the upsteam data by default
         if data is None:
             data = self._source_data
@@ -75,9 +69,9 @@ class PlotData:
 
     def _assign_variables(
         self,
-        data: Optional[DataFrame | Mapping],
-        variables: dict[str, Optional[Hashable | Vector]]
-    ) -> tuple[DataFrame, dict[str, Optional[str]]]:
+        data: DataSource,
+        variables: dict[str, VariableSpec],
+    ) -> tuple[DataFrame, dict[str, str | None]]:
         """
         Define plot variables given long-form data and/or vector inputs.
 
@@ -104,8 +98,11 @@ class PlotData:
             When variables are strings that don't appear in ``data``.
 
         """
-        plot_data: dict[str, Vector] = {}
-        var_names: dict[str, Optional[str]] = {}
+        frame: DataFrame
+        names: dict[str, str | None]
+
+        plot_data = {}
+        var_names = {}
 
         # Data is optional; all variables can be defined as vectors
         if data is None:
@@ -115,10 +112,8 @@ class PlotData:
         # Track https://data-apis.org/ for development
 
         # Variables can also be extracted from the index of a DataFrame
-        index: dict[str, Any]
         if isinstance(data, pd.DataFrame):
-            index = data.index.to_frame().to_dict(
-                "series")  # type: ignore  # data-sci-types wrong about to_dict return
+            index = data.index.to_frame().to_dict("series")
         else:
             index = {}
 
@@ -144,9 +139,9 @@ class PlotData:
             if val_as_data_key:
 
                 if val in data:
-                    plot_data[key] = data[val]  # type: ignore # fails on key: Hashable
+                    plot_data[key] = data[val]
                 elif val in index:
-                    plot_data[key] = index[val]  # type: ignore # fails on key: Hashable
+                    plot_data[key] = index[val]
                 var_names[key] = str(val)
 
             elif isinstance(val, str):
@@ -174,7 +169,7 @@ class PlotData:
                         )
                         raise ValueError(err)
 
-                plot_data[key] = val  # type: ignore # fails on key: Hashable
+                plot_data[key] = val
 
                 # Try to infer the name of the variable
                 var_names[key] = getattr(val, "name", None)
@@ -184,7 +179,7 @@ class PlotData:
         frame = pd.DataFrame(plot_data)
 
         # Reduce the variables dictionary to fields with valid data
-        names: dict[str, Optional[str]] = {
+        names = {
             var: name
             for var, name in var_names.items()
             # TODO I am not sure that this is necessary any more

@@ -9,9 +9,9 @@ from seaborn._core.rules import VarType, variable_type, categorical_order
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
-    from typing import Optional
+    from typing import Any, Callable
     from matplotlib.scale import ScaleBase
-    from .typing import VariableType
+    from seaborn._core.typing import VariableType
 
 
 class ScaleWrapper:
@@ -20,15 +20,19 @@ class ScaleWrapper:
         self,
         scale: ScaleBase,
         type: VariableType,
-        norm: Optional[Normalize] = None
+        norm: tuple[float | None, float | None] | Normalize | None = None,
     ):
 
-        self._scale = scale
-        self.norm = norm
         transform = scale.get_transform()
         self.forward = transform.transform
         self.reverse = transform.inverted().transform
-        self.type = type
+        self.type = VarType(type)
+
+        if norm is None:
+            norm = norm_from_scale(scale, norm)
+        self.norm = norm
+
+        self._scale = scale
 
     @property
     def order(self):
@@ -43,7 +47,7 @@ class ScaleWrapper:
 
 
 class CategoricalScale(LinearScale):
-    def __init__(self, axis: str, order: Optional[list], formatter: Optional):
+    def __init__(self, axis: str, order: list | None, formatter: Any):
         # TODO what type is formatter?
 
         super().__init__(axis)
@@ -85,7 +89,7 @@ class DatetimeScale(LinearScale):
 
 
 def norm_from_scale(
-    scale: ScaleBase, norm: Optional[tuple[Optional[float], Optional[float]]],
+    scale: ScaleBase, norm: tuple[float | None, float | None] | None,
 ) -> Normalize:
 
     if isinstance(norm, Normalize):
@@ -97,6 +101,8 @@ def norm_from_scale(
         vmin, vmax = norm  # TODO more helpful error if this fails?
 
     class ScaledNorm(Normalize):
+
+        transform: Callable
 
         def __call__(self, value, clip=None):
             # From github.com/matplotlib/matplotlib/blob/v3.4.2/lib/matplotlib/colors.py
@@ -122,9 +128,9 @@ def norm_from_scale(
             t_value = np.ma.masked_invalid(t_value, copy=False)
             return t_value[0] if is_scalar else t_value
 
-    norm = ScaledNorm(vmin, vmax)
+    new_norm = ScaledNorm(vmin, vmax)
 
     # TODO do this, or build the norm into the ScaleWrapper.foraward interface?
-    norm.transform = scale.get_transform().transform
+    new_norm.transform = scale.get_transform().transform  # type: ignore  # mypy #2427
 
-    return norm
+    return new_norm

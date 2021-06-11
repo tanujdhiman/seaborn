@@ -6,7 +6,7 @@ from numbers import Number
 from datetime import datetime
 
 import numpy as np
-import pandas as pd  # type: ignore
+import pandas as pd
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -23,7 +23,8 @@ class VarType(UserString):
 
     """
     # TODO VarType is an awfully overloaded name, but so is DataType ...
-    allowed = "numeric", "datetime", "categorical"
+    # TODO adding unknown because we are using this in for scales, is that right?
+    allowed = "numeric", "datetime", "categorical", "unknown"
 
     def __init__(self, data):
         assert data in self.allowed, data
