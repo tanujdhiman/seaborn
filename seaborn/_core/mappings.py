@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-from collections import abc
-
 import numpy as np
 import pandas as pd
 import matplotlib as mpl
+from matplotlib.colors import to_rgb
 
 from seaborn._core.rules import VarType, variable_type, categorical_order
 from seaborn.utils import get_color_cycle, remove_na
@@ -33,9 +32,10 @@ class SemanticMapping:
         if isinstance(x, pd.Series):
             if x.dtype.name == "category":  # TODO! possible pandas bug
                 x = x.astype(object)
-            return x.map(self.lookup_table)
+            # TODO where is best place to ensure that LUT values are rgba tuples?
+            return np.stack(x.map(self.lookup_table).map(to_rgb))
         else:
-            return self.lookup_table[x]
+            return to_rgb(self.lookup_table[x])
 
 
 # TODO Currently, the SemanticMapping objects are also the source of the information
@@ -60,7 +60,7 @@ class SemanticMapping:
 
 class GroupMapping(SemanticMapping):
     """Mapping that does not alter any visual properties of the artists."""
-    def setup(self, data: Series, scale: Scale | None) -> GroupMapping:
+    def setup(self, data: Series, scale: Scale | None = None) -> GroupMapping:
         self.levels = categorical_order(data)
         return self
 
@@ -77,7 +77,7 @@ class HueMapping(SemanticMapping):
     def setup(
         self,
         data: Series,  # TODO generally rename Series arguments to distinguish from DF?
-        scale: Scale | None,  # TODO or always have a Scale?
+        scale: Scale | None = None,  # TODO or always have a Scale?
     ) -> HueMapping:
         """Infer the type of mapping to use and define it using this vector of data."""
         palette: PaletteSpec = self._input_palette
@@ -90,6 +90,7 @@ class HueMapping(SemanticMapping):
         # e.g. specifying a numeric scale and a qualitative colormap should fail nicely.
 
         map_type = self._infer_map_type(scale, palette, data)
+        assert map_type in ["numeric", "categorical", "datetime"]
 
         # Our goal is to end up with a dictionary mapping every unique
         # value in `data` to a color. We will also keep track of the
@@ -123,9 +124,6 @@ class HueMapping(SemanticMapping):
                 list(data), palette, order,
             )
 
-        else:
-            raise RuntimeError()  # TODO should never get here ...
-
         # TODO do we need to return and assign out here or can the
         # type-specific methods do the assignment internally
 
@@ -151,11 +149,10 @@ class HueMapping(SemanticMapping):
             return scale.type
         elif palette in QUAL_PALETTES:
             map_type = VarType("categorical")
-        elif isinstance(palette, (abc.Mapping, abc.Sequence)):
+        elif isinstance(palette, (dict, list)):
             map_type = VarType("categorical")
         else:
-            map_type = variable_type(data)
-
+            map_type = variable_type(data, boolean_type="categorical")
         return map_type
 
     def _setup_categorical(
@@ -212,6 +209,10 @@ class HueMapping(SemanticMapping):
 
             # The presence of a norm object overrides a dictionary of hues
             # in specifying a numeric mapping, so we need to process it here.
+            # TODO this functionality only exists to support the old relplot
+            # hack for linking hue orders across facets. We don't need that any
+            # more and should probably remove this, but needs deprecation.
+            # (Also what should new behavior be? I think an error probably).
             levels = list(sorted(palette))
             colors = [palette[k] for k in sorted(palette)]
             cmap = mpl.colors.ListedColormap(colors)

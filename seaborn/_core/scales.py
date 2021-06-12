@@ -10,6 +10,7 @@ from seaborn._core.rules import VarType, variable_type, categorical_order
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from typing import Any, Callable
+    from pandas import Series
     from matplotlib.scale import ScaleBase
     from seaborn._core.typing import VariableType
 
@@ -19,13 +20,15 @@ class ScaleWrapper:
     def __init__(
         self,
         scale: ScaleBase,
-        type: VariableType,
+        type: VariableType,  # TODO don't use builtin name?
         norm: tuple[float | None, float | None] | Normalize | None = None,
     ):
 
         transform = scale.get_transform()
         self.forward = transform.transform
         self.reverse = transform.inverted().transform
+
+        # TODO can't we get type from the scale object in most cases?
         self.type = VarType(type)
 
         if norm is None:
@@ -47,16 +50,21 @@ class ScaleWrapper:
 
 
 class CategoricalScale(LinearScale):
-    def __init__(self, axis: str, order: list | None, formatter: Any):
+
+    def __init__(
+        self,
+        axis: str | None = None,
+        order: list | None = None,
+        formatter: Any = None
+    ):
         # TODO what type is formatter?
 
         super().__init__(axis)
         self.order = order
         self.formatter = formatter
 
-    def cast(self, data):
+    def cast(self, data: Series) -> Series:
 
-        data = pd.Series(data)
         order = pd.Index(categorical_order(data, self.order))
         if self.formatter is None:
             order = order.astype(str)
